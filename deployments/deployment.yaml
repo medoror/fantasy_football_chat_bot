@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-bot
+  namespace: game-bot
+  labels:
+    app: game-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game-bot
+  template:
+    metadata:
+      labels:
+        app: game-bot
+    spec:
+      containers:
+      - name: game-bot
+        image: game-bot:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 80
+        env:
+        - name: DISCORD_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: game-bot-secrets
+              key: discord-webhook-url
+        - name: LEAGUE_ID
+          value: "973157822"
+        - name: INIT_MSG
+          value: "Coming from my local k8s cluster"
