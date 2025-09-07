@@ -1,0 +1,22 @@
+replicaCount: 1
+
+image:
+  repository: game-bot
+  tag: ""
+  pullPolicy: Never
+
+containerPort: 80
+
+config:
+  leagueId: "973157822"
+  initMsg: "Coming from my local k8s cluster"
+  startDate: "2025-09-04"
+  endDate: "2026-01-05"
+  timezone: "America/Chicago"
+  leagueYear: "2025"
+
+secrets:
+  discordWebhookUrl: ""  # Set this when deploying
+
+nameOverride: ""
+fullnameOverride: ""

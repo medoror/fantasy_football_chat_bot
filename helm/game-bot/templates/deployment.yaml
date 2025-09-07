@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "game-bot.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "game-bot.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "game-bot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "game-bot.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.containerPort }}
+        env:
+        - name: DISCORD_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "game-bot.secretName" . }}
+              key: discord-webhook-url
+        - name: LEAGUE_ID
+          value: {{ .Values.config.leagueId | quote }}
+        - name: INIT_MSG
+          value: {{ .Values.config.initMsg | quote }}
+        - name: START_DATE
+          value: {{ .Values.config.startDate | quote }}
+        - name: END_DATE
+          value: {{ .Values.config.endDate | quote }}
+        - name: TIMEZONE
+          value: {{ .Values.config.timezone | quote }}
+        - name: LEAGUE_YEAR
+          value: {{ .Values.config.leagueYear | quote }}

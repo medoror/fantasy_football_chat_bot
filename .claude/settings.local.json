@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(kubectl get:*)",
-      "Bash(k3d kubeconfig merge:*)"
+      "Bash(k3d kubeconfig merge:*)",
+      "Bash(kubectl describe:*)"
     ],
     "deny": [],
     "ask": []
