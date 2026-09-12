@@ -19,6 +19,9 @@ Like the bot? Star the repository and consider making a donation to buy me a cof
 
 This repository runs a GroupMe, Discord, or Slack chat bot to send ESPN Fantasy Football information to a GroupMe, Discord or Slack chat room.
 
+**Sleeper support:** This bot also supports [Sleeper](https://sleeper.com/) leagues. See the
+[Sleeper Support](#sleeper-support) section below for the (currently reduced) feature set and setup.
+
 **What does this do?**
 
 Schedule Link: https://www.gamedaybot.com/message-schedule/
@@ -43,6 +46,7 @@ Table of Contents
      * [Discord setup](#discord-setup)
      * [Heroku setup](#heroku-setup)
      * [Private Leagues](#private-leagues)
+  * [Sleeper Support](#sleeper-support)
   * [Troubleshooting / FAQ](#troubleshooting--faq)
   * [Getting Started for development and testing](#getting-started-for-development-and-testing)
      * [Installing for development](#installing-for-development)
@@ -220,10 +224,12 @@ pip install -r requirements.txt
 ### Environment Variables
 |Var|Type|Required|Default|Description|
 |---|----|--------|-------|-----------|
+|PLATFORM|String|No|espn|Which fantasy platform to use: `espn` or `sleeper`. See [Sleeper Support](#sleeper-support) for the reduced feature set when set to `sleeper`. Leaving this unset preserves all existing ESPN behavior.|
 |BOT_ID|String|For GroupMe|None|This is your Bot ID from the GroupMe developers page|
 |SLACK_WEBHOOK_URL|String|For Slack|None|This is your Webhook URL from the Slack App page|
 |DISCORD_WEBHOOK_URL|String|For Discord|None|This is your Webhook URL from the Discord Settings page|
-|LEAGUE_ID|String|Yes|None|This is your ESPN league id|
+|LEAGUE_ID|String|Yes, for ESPN|None|This is your ESPN league id|
+|SLEEPER_LEAGUE_ID|String|Yes, for Sleeper|None|This is your Sleeper league id (only used when `PLATFORM=sleeper`)|
 |START_DATE|Date|Yes|Start of current season (YYYY-MM-DD)|This is when the bot will start paying attention and sending messages to your chat.|
 |END_DATE|Date|Yes|End of current season (YYYY-MM-DD)|This is when the bot will stop paying attention and stop sending messages to your chat.|
 |LEAGUE_YEAR|String|Yes|Currernt Year (YYYY)|ESPN League year to look at|
@@ -286,6 +292,44 @@ Right click anywhere on the website and click inspect option.
 From there click Application on the top bar.
 On the left under Storage section click Cookies then http://fantasy.espn.com.
 From there you should be able to find your swid and espn_s2 variables and values.
+
+## Sleeper Support
+
+In addition to ESPN, this bot supports [Sleeper](https://sleeper.com/) leagues. Sleeper's API is
+unauthenticated and public, so setup is simpler than ESPN: you only need your league's `SLEEPER_LEAGUE_ID`
+(found in your league's URL on sleeper.com or the Sleeper app) and `PLATFORM=sleeper`.
+
+```bash
+>>> export PLATFORM=sleeper
+>>> export SLEEPER_LEAGUE_ID=[enter your Sleeper league ID]
+>>> export BOT_ID=[enter your GroupMe Bot ID]
+>>> python3 gamedaybot/espn/espn_bot.py
+```
+
+**Reduced feature set:** Sleeper's REST API does not expose everything ESPN's API does, so
+Sleeper support currently only includes:
+* **Current Standings** - team name/owner, wins, losses, ties, and points for
+* **Trophies** - high score, low score, closest score, biggest blowout, and lucky/unlucky
+  (record vs. points-rank mismatch)
+* **Score Update** - each matchup's current score for the week
+* **Matchups** - each matchup's team names and win-loss(-tie) records for the week (no projections)
+* **Waiver Report** - today's completed waiver/free-agent adds and drops, with FAAB amount when set
+* **Final** - the week's final score update followed by its trophies
+* **Power Rankings** - a faithful port of ESPN's own two-step-dominance / 80-15-5 algorithm,
+  computed from Sleeper's weekly matchup data; the playoff-percentage column is omitted since
+  Sleeper has no equivalent field
+
+The following ESPN features are **not** available for Sleeper leagues, and are not scheduled when
+`PLATFORM=sleeper`:
+* **Player Monitor** - not implemented for Sleeper in this version
+* **Projected Scoreboard / Projected Close Scores** - Sleeper's API has no projected-points field
+  anywhere, so these cannot be computed
+* **Achiever/Underachiever trophies** - also require projected points, so they're omitted from
+  Sleeper's trophies
+
+Leaving `PLATFORM` unset (or set to `espn`) preserves all existing ESPN behavior and environment
+variables exactly as before.
+
 ## FAQ
 
 **League must be full.**
