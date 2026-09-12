@@ -614,6 +614,60 @@ class TestPowerRankingsHistory:
         # is zero for both and the only contribution to power is average score.
         assert sorted(result) == [('15.00', 1), ('15.00', 2)]
 
+    def test_bye_week_counts_toward_own_average_but_credits_no_wins(self, mock_requests):
+        # Roster 3 is on a bye (matchup_id: null) while rosters 1 and 2 play a
+        # real head-to-head matchup. Contract: the bye roster's real score for
+        # the week still counts toward its own average/history, it gets no win
+        # credited to it (and credits no one else a win either), and rosters 1
+        # and 2's own history is untouched by roster 3's bye entry.
+        rosters = [
+            {'roster_id': 1, 'owner_id': '1',
+             'settings': {'wins': 1, 'losses': 0, 'ties': 0, 'fpts': 100, 'fpts_decimal': 0}},
+            {'roster_id': 2, 'owner_id': '2',
+             'settings': {'wins': 0, 'losses': 1, 'ties': 0, 'fpts': 80, 'fpts_decimal': 0}},
+            {'roster_id': 3, 'owner_id': '3',
+             'settings': {'wins': 0, 'losses': 0, 'ties': 0, 'fpts': 55, 'fpts_decimal': 0}},
+        ]
+        users = USERS[:3]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=users)
+        week1_matchups = [
+            {'roster_id': 1, 'matchup_id': 1, 'points': 100.0},
+            {'roster_id': 2, 'matchup_id': 1, 'points': 80.0},
+            {'roster_id': 3, 'matchup_id': None, 'points': 55.0},
+        ]
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/1', json=week1_matchups)
+        client = SleeperAPI('12345')
+
+        roster_ids, scores, mov, schedule = sleeper._build_matchup_history(client, week=1)
+
+        # The bye roster's real score for the week still counts toward its own
+        # history, contributing zero margin and scheduled against itself (no
+        # real opponent) - mirroring espn_api's own bye handling.
+        assert roster_ids == [1, 2, 3]
+        assert scores[3] == [55.0]
+        assert mov[3] == [0]
+        assert schedule[3] == [3]
+
+        # Rosters 1 and 2's own history reflects only their real matchup against
+        # each other - unaffected by roster 3's bye entry.
+        assert scores[1] == [100.0]
+        assert scores[2] == [80.0]
+        assert mov[1] == [20.0]
+        assert mov[2] == [-20.0]
+        assert schedule[1] == [2]
+        assert schedule[2] == [1]
+
+        # The bye contributes no win to anyone: roster 3's dominance is 0 (no
+        # 0.8-weighted contribution), so its power comes only from its own
+        # average score/margin: int(0)*0.8 + int(55)*0.15 + int(0)*0.05 = 8.25.
+        # Roster 1's win over roster 2 (the only real result this week) is
+        # likewise unaffected by the bye: int(1)*0.8 + int(100)*0.15 + int(20)*0.05 = 16.80.
+        power = dict((roster_id, float(score)) for score, roster_id in
+                     sleeper._power_rankings(client, week=1, current_week=1))
+        assert power[1] == pytest.approx(16.80)
+        assert power[2] == pytest.approx(11.00)
+        assert power[3] == pytest.approx(8.25)
+
 
 @pytest.mark.usefixtures("mock_requests")
 class TestGetPowerRankings:
