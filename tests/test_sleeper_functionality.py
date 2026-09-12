@@ -71,6 +71,45 @@ class TestGetStandings:
         ])
         assert result == expected
 
+    def test_get_standings_null_settings_treated_as_zero(self, mock_requests):
+        # Sleeper returns "settings": null for uninitialized/newly-joined rosters.
+        rosters = [
+            {'roster_id': 1, 'owner_id': '1',
+             'settings': {'wins': 1, 'losses': 0, 'ties': 0, 'fpts': 100, 'fpts_decimal': 0}},
+            {'roster_id': 2, 'owner_id': '2', 'settings': None},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=USERS[:2])
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_standings(client)
+
+        expected = '\n'.join([
+            'Current Standings',
+            ' 1: (1-0) Dynasty Warriors ',
+            ' 2: (0-0) Gridiron Gang ',
+        ])
+        assert result == expected
+
+    def test_get_standings_ties_rank_above_equal_wins_with_more_points(self, mock_requests):
+        rosters = [
+            # Same win count as roster 2, but with ties and fewer points; should still rank first.
+            {'roster_id': 1, 'owner_id': '1',
+             'settings': {'wins': 5, 'losses': 0, 'ties': 2, 'fpts': 500, 'fpts_decimal': 0}},
+            {'roster_id': 2, 'owner_id': '2',
+             'settings': {'wins': 5, 'losses': 2, 'ties': 0, 'fpts': 900, 'fpts_decimal': 0}},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=USERS[:2])
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_standings(client)
+
+        expected = '\n'.join([
+            'Current Standings',
+            ' 1: (5-0-2) Dynasty Warriors ',
+            ' 2: (5-2-0) Gridiron Gang ',
+        ])
+        assert result == expected
+
 
 @pytest.mark.usefixtures("mock_requests")
 class TestGetTrophies:
@@ -134,3 +173,41 @@ class TestGetTrophies:
         assert '🍀 Lucky 🍀' not in result
         assert '😡 Unlucky 😡' not in result
         assert 'Dynasty Warriors with 100.00 points' in result
+
+    def test_get_trophies_excludes_bye_week_entries(self, mock_requests):
+        # Two rosters on a playoff-round bye share matchup_id: null and must not be
+        # paired against each other, nor corrupt the high/low score trophies.
+        matchups = MATCHUPS_WEEK_5 + [
+            {'roster_id': 5, 'matchup_id': None, 'points': 0.0},
+            {'roster_id': 6, 'matchup_id': None, 'points': 0.0},
+        ]
+        users = USERS + [
+            {'user_id': '5', 'display_name': 'Eve', 'metadata': {'team_name': 'Bye Week Squad'}},
+            {'user_id': '6', 'display_name': 'Frank', 'metadata': {'team_name': 'Resting Roster'}},
+        ]
+        bye_settings = {'wins': 6, 'losses': 1, 'ties': 0, 'fpts': 700, 'fpts_decimal': 0}
+        rosters = ROSTERS + [
+            {'roster_id': 5, 'owner_id': '5', 'settings': bye_settings},
+            {'roster_id': 6, 'owner_id': '6', 'settings': bye_settings},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=users)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=matchups)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_trophies(client, week=5)
+
+        # The bye-week teams must not appear anywhere in the trophy output.
+        assert 'Bye Week Squad' not in result
+        assert 'Resting Roster' not in result
+        # And they must not steal the low-score trophy with their 0.0 bye score.
+        assert 'Low score' in result
+        assert 'Dave with 60.00 points' in result
+
+    def test_get_trophies_empty_matchups_returns_message(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=[])
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_trophies(client, week=5)
+
+        assert result == '\n'.join(['Trophies of the week:', 'No matchups available for this week'])

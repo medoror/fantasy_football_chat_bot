@@ -35,14 +35,17 @@ def get_standings(client):
 
     standings = []
     for roster in rosters:
-        settings = roster.get('settings', {})
+        # Sleeper returns "settings": null for uninitialized/newly-joined rosters.
+        settings = roster.get('settings') or {}
         wins = settings.get('wins', 0)
         losses = settings.get('losses', 0)
         ties = settings.get('ties', 0)
         fpts = settings.get('fpts', 0) + settings.get('fpts_decimal', 0) / 100
         standings.append((wins, losses, ties, fpts, team_names[roster['roster_id']]))
 
-    standings.sort(key=lambda row: (row[0], row[3]), reverse=True)
+    # Ties count as partial wins for ranking purposes, so a 5-0-2 record ranks
+    # above a 5-2-0 record even though both have 5 wins.
+    standings.sort(key=lambda row: (row[0] + 0.5 * row[2], row[3]), reverse=True)
 
     show_ties = any(row[2] for row in standings)
     if show_ties:
@@ -143,6 +146,13 @@ def get_trophies(client, week=None):
     users = client.get_users()
     team_names = _team_names_by_roster_id(rosters, users)
 
+    # Rosters on a bye have matchup_id: null and no real opponent to compare
+    # against; exclude them from both the score pool and matchup pairing.
+    matchups = [m for m in matchups if m.get('matchup_id') is not None]
+
+    if not matchups:
+        return '\n'.join(['Trophies of the week:', 'No matchups available for this week'])
+
     scores = [(m['points'], team_names.get(m['roster_id'], f"Team {m['roster_id']}")) for m in matchups]
     high_points, high_team = max(scores, key=lambda s: s[0])
     low_points, low_team = min(scores, key=lambda s: s[0])
@@ -159,7 +169,7 @@ def get_trophies(client, week=None):
 
     for entries in grouped.values():
         if len(entries) != 2:
-            # Bye weeks or malformed matchup groups: no head-to-head result to compare.
+            # Malformed matchup group (not exactly 2 rosters): no head-to-head result to compare.
             continue
 
         a, b = entries
