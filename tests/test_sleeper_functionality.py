@@ -474,3 +474,194 @@ class TestGetFinal:
 
         assert result.startswith('Final Score Update')
         assert 'Trophies of the week:' in result
+
+
+# Hand-derived 4-team, 2-week scenario used by TestPowerRankingsMath and
+# TestGetPowerRankings below.
+#
+# Week 1: roster 1 beats roster 2 (120.5 - 110.0); roster 3 beats roster 4 (95.0 - 60.0)
+# Week 2: roster 1 beats roster 3 (130.0 - 100.0); roster 2 beats roster 4 (105.0 - 95.0)
+#
+# Win matrix through week 2 (rows/cols in roster_id order 1,2,3,4):
+#   1: [0,1,1,0]   (beat 2 and 3)
+#   2: [0,0,0,1]   (beat 4)
+#   3: [0,0,0,1]   (beat 4)
+#   4: [0,0,0,0]   (no wins)
+#
+# X^2 (matrix multiplication, NOT elementwise): only row 1 is non-zero, since
+# rosters 2 and 3 both beat 4 and roster 1 beat both 2 and 3:
+#   X^2[1] = [0,0,0,2]  (roster 1 gets credit for 2 (2->4) and 3 (3->4)'s indirect win over 4)
+#   X^2[2] = X^2[3] = X^2[4] = [0,0,0,0]
+#
+# two_step_dominance (row sums of X^2 + X): roster 1 = 4, roster 2 = 1, roster 3 = 1, roster 4 = 0.
+#
+# Final power (dominance*0.8 + avg_score*0.15 + avg_mov*0.05, each int-truncated
+# first), averaged over both weeks: roster 1 = 22.95, roster 2 = 16.85,
+# roster 3 = 15.45, roster 4 = 10.45. Rosters 2 and 3 tie on dominance (1 each),
+# but roster 2's higher average score/margin (avg_score 107.5 vs 97.5, avg_mov
+# -0.25 vs 2.5, both truncated before weighting: int(107.5)=107 * 0.15 = 16.05
+# beats int(97.5)=97 * 0.15 = 14.55 by more than the margin term can close)
+# gives it the higher final power score.
+POWER_MATCHUPS_WEEK_1 = [
+    {'roster_id': 1, 'matchup_id': 1, 'points': 120.5},
+    {'roster_id': 2, 'matchup_id': 1, 'points': 110.0},
+    {'roster_id': 3, 'matchup_id': 2, 'points': 95.0},
+    {'roster_id': 4, 'matchup_id': 2, 'points': 60.0},
+]
+POWER_MATCHUPS_WEEK_2 = [
+    {'roster_id': 1, 'matchup_id': 1, 'points': 130.0},
+    {'roster_id': 3, 'matchup_id': 1, 'points': 100.0},
+    {'roster_id': 2, 'matchup_id': 2, 'points': 105.0},
+    {'roster_id': 4, 'matchup_id': 2, 'points': 95.0},
+]
+
+
+def _mock_power_ranking_weeks(mock_requests, league_id='12345'):
+    mock_requests.get(f'https://api.sleeper.app/v1/league/{league_id}/matchups/1', json=POWER_MATCHUPS_WEEK_1)
+    mock_requests.get(f'https://api.sleeper.app/v1/league/{league_id}/matchups/2', json=POWER_MATCHUPS_WEEK_2)
+
+
+class TestPowerRankingsMath:
+    '''Test the two-step-dominance matrix math directly against a hand-derived win matrix'''
+
+    def test_square_matrix_is_real_matrix_multiplication(self):
+        # See espn_api/football/utils.py:23-37 (square_matrix): despite the name,
+        # this is X @ X, not an elementwise square - confirmed by reading the
+        # actual installed espn_api 0.46.0 source.
+        x = [
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+        ]
+
+        squared = sleeper._square_matrix(x)
+
+        assert squared == [
+            [0.0, 0.0, 0.0, 2.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ]
+
+    def test_two_step_dominance_matches_hand_derived_win_matrix(self):
+        x = [
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0],
+        ]
+
+        dominance = sleeper._two_step_dominance(x)
+
+        assert dominance == [4.0, 1.0, 1.0, 0.0]
+
+    def test_two_step_dominance_tied_matchup_yields_no_wins(self):
+        # A 2x2 win matrix with no recorded wins (as would result from every
+        # matchup being tied) has zero dominance for both teams.
+        x = [
+            [0, 0],
+            [0, 0],
+        ]
+
+        dominance = sleeper._two_step_dominance(x)
+
+        assert dominance == [0.0, 0.0]
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestPowerRankingsHistory:
+    '''Test _power_rankings end-to-end against mocked multi-week Sleeper matchup data'''
+
+    def test_power_rankings_ranking_order_matches_hand_derived_dominance(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        _mock_power_ranking_weeks(mock_requests)
+        client = SleeperAPI('12345')
+
+        result = sleeper._power_rankings(client, week=2, current_week=2)
+
+        # Hand-derived expected order: roster 1 (dominance 4) way out front,
+        # then roster 2 ahead of roster 3 (equal dominance of 1, but roster 2's
+        # higher average score/margin gives it the edge), then roster 4
+        # (dominance 0) last. See the comment above POWER_MATCHUPS_WEEK_1/2.
+        ranked_roster_ids = [roster_id for _, roster_id in result]
+        assert ranked_roster_ids == [1, 2, 3, 4]
+
+        scores = {roster_id: float(score) for score, roster_id in result}
+        assert scores[1] == pytest.approx(22.95)
+        assert scores[2] == pytest.approx(16.85)
+        assert scores[3] == pytest.approx(15.45)
+        assert scores[4] == pytest.approx(10.45)
+
+    def test_power_rankings_tied_matchup_credits_no_wins_to_either_team(self, mock_requests):
+        tied_settings = {'wins': 0, 'losses': 0, 'ties': 2, 'fpts': 200, 'fpts_decimal': 0}
+        rosters = [
+            {'roster_id': 1, 'owner_id': '1', 'settings': tied_settings},
+            {'roster_id': 2, 'owner_id': '2', 'settings': tied_settings},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=USERS[:2])
+        tied_week = [
+            {'roster_id': 1, 'matchup_id': 1, 'points': 100.0},
+            {'roster_id': 2, 'matchup_id': 1, 'points': 100.0},
+        ]
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/1', json=tied_week)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/2', json=tied_week)
+        client = SleeperAPI('12345')
+
+        result = sleeper._power_rankings(client, week=2, current_week=2)
+
+        # Neither roster ever wins a matchup (every week is a tie), so dominance
+        # is zero for both and the only contribution to power is average score.
+        assert sorted(result) == [('15.00', 1), ('15.00', 2)]
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestGetPowerRankings:
+    '''Test get_power_rankings against mocked Sleeper roster/user/matchup endpoints'''
+
+    def test_get_power_rankings_explicit_week(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        _mock_power_ranking_weeks(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 3, 'season': '2024'})
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_power_rankings(client, week=2)
+
+        lines = result.split('\n')
+        assert lines[0] == 'Power Rankings'
+        # Top team's own snapshot always normalizes to exactly 99.99.
+        assert lines[1].startswith('99.99')
+        assert 'Dynasty Warriors' in lines[1]
+        # Hand-derived order: Dynasty Warriors (1), Gridiron Gang (2), End Zone Elite (3), Dave (4).
+        team_order = [line.split(' - ')[-1] for line in lines[1:]]
+        assert team_order == ['Dynasty Warriors', 'Gridiron Gang', 'End Zone Elite', 'Dave']
+        # No playoff-percentage parenthetical - Sleeper has no such field.
+        assert '(' not in result
+
+    def test_get_power_rankings_defaults_to_prior_week(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        _mock_power_ranking_weeks(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 3, 'season': '2024'})
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_power_rankings(client)
+
+        assert result.startswith('Power Rankings')
+        assert 'Dynasty Warriors' in result
+
+    def test_get_power_rankings_week_one_has_no_previous_snapshot(self, mock_requests):
+        # At current_week=1, week defaults to 0, which _power_rankings clamps
+        # back up to current_week=1 - only one week of history exists, so
+        # there's no previous snapshot to diff against and no crash.
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 1, 'season': '2024'})
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/1', json=POWER_MATCHUPS_WEEK_1)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_power_rankings(client)
+
+        assert result.startswith('Power Rankings')
+        for team_name in ('Dynasty Warriors', 'Gridiron Gang', 'End Zone Elite', 'Dave'):
+            assert team_name in result
+        # No previous snapshot means no movement indicator brackets for anyone.
+        assert '[' not in result

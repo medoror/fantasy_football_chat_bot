@@ -315,10 +315,12 @@ Sleeper support currently only includes:
 * **Matchups** - each matchup's team names and win-loss(-tie) records for the week (no projections)
 * **Waiver Report** - today's completed waiver/free-agent adds and drops, with FAAB amount when set
 * **Final** - the week's final score update followed by its trophies
+* **Power Rankings** - a faithful port of ESPN's own two-step-dominance / 80-15-5 algorithm,
+  computed from Sleeper's weekly matchup data; the playoff-percentage column is omitted since
+  Sleeper has no equivalent field
 
 The following ESPN features are **not** available for Sleeper leagues, and are not scheduled when
 `PLATFORM=sleeper`:
-* **Power Rankings** - not implemented for Sleeper in this version
 * **Player Monitor** - not implemented for Sleeper in this version
 * **Projected Scoreboard / Projected Close Scores** - Sleeper's API has no projected-points field
   anywhere, so these cannot be computed

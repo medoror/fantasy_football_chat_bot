@@ -447,3 +447,231 @@ def get_final(client, week=None):
     text = "Final " + get_scoreboard_short(client, week=week)
     text = text + "\n\n" + get_trophies(client, week=week)
     return text
+
+
+def _square_matrix(x):
+    """
+    Multiply a matrix by itself (real matrix multiplication, NOT an elementwise
+    square, despite the name this mirrors). Ports espn_api.football.utils.square_matrix
+    verbatim (the O(n^3) row-by-column product result[i][j] += x[i][k] * x[k][j]),
+    confirmed against espn_api 0.46.0's actual installed source at
+    espn_api/football/utils.py:23-37.
+    """
+
+    n = len(x)
+    result = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(n):
+            for k in range(n):
+                result[i][j] += x[i][k] * x[k][j]
+    return result
+
+
+def _two_step_dominance(x):
+    """
+    Two-step dominance score per team: 2-hop indirect wins (wins racked up by the
+    teams you've beaten) plus your own direct wins. Ports
+    espn_api.football.utils.two_step_dominance, confirmed against espn_api 0.46.0's
+    actual installed source at espn_api/football/utils.py:53-57.
+    """
+
+    squared = _square_matrix(x)
+    n = len(x)
+    return [sum(squared[i][j] + x[i][j] for j in range(n)) for i in range(n)]
+
+
+def _build_matchup_history(client, week):
+    """
+    Build each roster's cumulative per-week (score, margin of victory, opponent)
+    history for weeks 1..week, mirroring espn_api's Team.scores/mov/schedule.
+
+    A roster on a bye (matchup_id: null) is treated as its own opponent for that
+    week - its real score still counts toward its average, contributing a 0
+    margin and no win to anyone - matching how espn_api's own Team._fetch_schedule
+    handles a bye (opponent_id set to the team's own id).
+
+    Note
+    ----
+    This issues one Sleeper /league/{id}/matchups/{week} request PER historical
+    week from 1 through `week`, since Sleeper has no bulk multi-week endpoint.
+    Acceptable given Sleeper's generous rate limits, but worth knowing before
+    calling this deep into a long season.
+
+    Returns
+    -------
+    tuple
+        (roster_ids, scores, mov, schedule) where roster_ids is a sorted list of
+        roster ids, and scores/mov/schedule are dicts of roster_id -> list, one
+        entry appended per week processed.
+    """
+
+    rosters = client.get_rosters()
+    roster_ids = sorted(r['roster_id'] for r in rosters)
+
+    scores = {rid: [] for rid in roster_ids}
+    mov = {rid: [] for rid in roster_ids}
+    schedule = {rid: [] for rid in roster_ids}
+
+    for w in range(1, week + 1):
+        matchups = client.get_matchups(w)
+
+        for m in matchups:
+            if m.get('matchup_id') is None and m['roster_id'] in scores:
+                rid = m['roster_id']
+                scores[rid].append(m['points'])
+                mov[rid].append(0)
+                schedule[rid].append(rid)
+
+        for a, b in _paired_matchups(matchups):
+            a_id, b_id = a['roster_id'], b['roster_id']
+            if a_id not in scores or b_id not in scores:
+                continue
+            scores[a_id].append(a['points'])
+            scores[b_id].append(b['points'])
+            mov[a_id].append(a['points'] - b['points'])
+            mov[b_id].append(b['points'] - a['points'])
+            schedule[a_id].append(b_id)
+            schedule[b_id].append(a_id)
+
+    return roster_ids, scores, mov, schedule
+
+
+def _power_points(dominance, roster_ids, scores, mov, week):
+    """
+    Blend dominance, average score, and average margin of victory 80/15/5.
+    Ports espn_api.football.utils.power_points, INCLUDING its int-truncation of
+    each term before weighting, confirmed against espn_api 0.46.0's actual
+    installed source at espn_api/football/utils.py:60-73.
+
+    Returns
+    -------
+    list of tuple
+        (power_str, roster_id) pairs sorted by power score descending.
+    """
+
+    if week <= 0:
+        week = 1
+
+    results = []
+    for score, roster_id in zip(dominance, roster_ids):
+        avg_score = sum(scores[roster_id][:week]) / week
+        avg_mov = sum(mov[roster_id][:week]) / week
+        power = (int(score) * 0.8) + (int(avg_score) * 0.15) + (int(avg_mov) * 0.05)
+        results.append((f'{power:.2f}', roster_id))
+
+    return sorted(results, key=lambda tup: float(tup[0]), reverse=True)
+
+
+def _power_rankings(client, week, current_week):
+    """
+    Compute a single cumulative power-rankings snapshot through the given week.
+    Ports espn_api.football.league.League.power_rankings, confirmed against
+    espn_api 0.46.0's actual installed source at espn_api/football/league.py:337-356.
+
+    Returns
+    -------
+    list of tuple
+        (power_str, roster_id) pairs sorted by power score descending.
+    """
+
+    if not week or week <= 0 or week > current_week:
+        week = current_week
+
+    roster_ids, scores, mov, schedule = _build_matchup_history(client, week)
+
+    index = {rid: i for i, rid in enumerate(roster_ids)}
+    win_matrix = []
+    for roster_id in roster_ids:
+        wins = [0] * len(roster_ids)
+        for m, opp in zip(mov[roster_id][:week], schedule[roster_id][:week]):
+            if m > 0:
+                wins[index[opp]] += 1
+        win_matrix.append(wins)
+
+    dominance = _two_step_dominance(win_matrix)
+    return _power_points(dominance, roster_ids, scores, mov, week)
+
+
+def get_power_rankings(client, week=None):
+    """
+    Retrieve the power rankings for a Sleeper fantasy football league, using a
+    faithful port of ESPN's own two-step-dominance / 80-15-5 (dominance/average
+    score/average margin of victory) algorithm, computed from Sleeper's per-week
+    matchup data instead of espn_api's Team objects.
+
+    Note
+    ----
+    Sleeper has no playoff-percentage field, so unlike the ESPN version this
+    output omits the playoff-percentage parenthetical entirely rather than
+    substituting anything in its place.
+
+    Note
+    ----
+    Computing one cumulative snapshot requires one Sleeper
+    /league/{id}/matchups/{week} request per historical week from 1 through
+    that week, and this function computes two snapshots (current and previous)
+    to show movement - acceptable given Sleeper's generous rate limits, but
+    worth knowing before calling this deep into a long season.
+
+    Parameters
+    ----------
+    client : gamedaybot.sleeper.sleeper_api.SleeperAPI
+        The Sleeper API client for the league to retrieve power rankings for.
+    week : int, optional
+        The week for which to retrieve power rankings. Defaults to the prior completed week.
+
+    Returns
+    -------
+    str
+        A string representing the power rankings with changes from the previous week.
+    """
+
+    state = client.get_nfl_state()
+    current_week = int(state['week'])
+
+    if not week:
+        week = current_week - 1
+
+    p_rank_up_emoji = "🟢"
+    p_rank_down_emoji = "🔻"
+    p_rank_same_emoji = "🟰"
+
+    current_rankings = _power_rankings(client, week, current_week)
+    previous_rankings = _power_rankings(client, week - 1, current_week) if week > 1 else []
+
+    def normalize_rankings(rankings):
+        if not rankings:
+            return []
+        max_score = max(float(score) for score, _ in rankings)
+        return [(f"{99.99 * float(score) / max_score:.2f}", roster_id) for score, roster_id in rankings]
+
+    normalized_current_rankings = normalize_rankings(current_rankings)
+    normalized_previous_rankings = normalize_rankings(previous_rankings)
+
+    previous_rankings_dict = {roster_id: score for score, roster_id in normalized_previous_rankings}
+
+    rosters = client.get_rosters()
+    users = client.get_users()
+    team_names = _team_names_by_roster_id(rosters, users)
+
+    rankings_text = ['Power Rankings']
+    for normalized_current_score, roster_id in normalized_current_rankings:
+        team_name = team_names.get(roster_id, f"Team {roster_id}")
+        rank_change_text = ''
+
+        if roster_id in previous_rankings_dict:
+            previous_score = previous_rankings_dict[roster_id]
+            current_score_f = float(normalized_current_score)
+            previous_score_f = float(previous_score)
+            rank_change_percent = ((current_score_f - previous_score_f) / previous_score_f) * 100
+            if rank_change_percent > 0:
+                rank_change_emoji = p_rank_up_emoji
+            elif rank_change_percent < 0:
+                rank_change_emoji = p_rank_down_emoji
+            else:
+                rank_change_emoji = p_rank_same_emoji
+            rank_change_text = f"[{rank_change_emoji}{abs(rank_change_percent):4.1f}%]"
+
+        rankings_text.append(f"{normalized_current_score}{rank_change_text} - {team_name}")
+
+    return '\n'.join(rankings_text)

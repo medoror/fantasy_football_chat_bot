@@ -41,7 +41,7 @@ def sleeper_bot(function):
     Notes
     -----
     Sleeper v1 supports a reduced feature set compared to the ESPN bot, since
-    Sleeper's API exposes no power rankings or projected-points data. See
+    Sleeper's API exposes no projected-points data. See
     gamedaybot/sleeper/functionality.py.
 
     Possible function values:
@@ -52,6 +52,7 @@ def sleeper_bot(function):
     get_matchups: sends the current week's matchups and records.
     get_waiver_report: sends a message with today's waiver/free-agent transactions.
     get_final: sends the final scores and trophies for the previous week.
+    get_power_rankings: sends a message with the power rankings for the league.
     broadcast: sends a custom broadcast message.
     init: sends a message to confirm that the bot has been set up.
     """
@@ -100,6 +101,8 @@ def sleeper_bot(function):
         text = sleeper.get_waiver_report(client)
     elif function == "get_final":
         text = sleeper.get_final(client)
+    elif function == "get_power_rankings":
+        text = sleeper.get_power_rankings(client)
     elif function == "broadcast":
         try:
             text = broadcast_message
