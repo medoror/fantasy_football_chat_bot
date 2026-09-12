@@ -306,18 +306,24 @@ unauthenticated and public, so setup is simpler than ESPN: you only need your le
 >>> python3 gamedaybot/espn/espn_bot.py
 ```
 
-**Reduced feature set (v1):** Sleeper's REST API does not expose everything ESPN's API does, so
+**Reduced feature set:** Sleeper's REST API does not expose everything ESPN's API does, so
 Sleeper support currently only includes:
 * **Current Standings** - team name/owner, wins, losses, ties, and points for
 * **Trophies** - high score, low score, closest score, biggest blowout, and lucky/unlucky
   (record vs. points-rank mismatch)
+* **Score Update** - each matchup's current score for the week
+* **Matchups** - each matchup's team names and win-loss(-tie) records for the week (no projections)
+* **Waiver Report** - today's completed waiver/free-agent adds and drops, with FAAB amount when set
+* **Final** - the week's final score update followed by its trophies
 
 The following ESPN features are **not** available for Sleeper leagues, and are not scheduled when
 `PLATFORM=sleeper`:
 * **Power Rankings** - not implemented for Sleeper in this version
-* **Projection-based features** - matchups with projections, projected scoreboard, projected close
-  scores, and the overachiever/underachiever trophies. Sleeper's API has no projected-points field
-  anywhere, so these cannot be computed.
+* **Player Monitor** - not implemented for Sleeper in this version
+* **Projected Scoreboard / Projected Close Scores** - Sleeper's API has no projected-points field
+  anywhere, so these cannot be computed
+* **Achiever/Underachiever trophies** - also require projected points, so they're omitted from
+  Sleeper's trophies
 
 Leaving `PLATFORM` unset (or set to `espn`) preserves all existing ESPN behavior and environment
 variables exactly as before.

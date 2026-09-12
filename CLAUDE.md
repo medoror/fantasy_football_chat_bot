@@ -48,19 +48,22 @@ This is a Fantasy Football chat bot that sends automated messages to GroupMe, Sl
 **Sleeper Components (PLATFORM=sleeper):**
 Sleeper (`api.sleeper.app/v1`) is unauthenticated and needs no year/cookie auth - a league is
 identified solely by `SLEEPER_LEAGUE_ID`. It is implemented as a parallel package (not a
-shared-interface refactor of the ESPN side), with a **reduced feature set**: only standings and
-trophies (high/low score, closest score/biggest blowout, lucky/unlucky). Power rankings and every
+shared-interface refactor of the ESPN side), with a **reduced feature set**: standings, trophies
+(high/low score, closest score/biggest blowout, lucky/unlucky), a scoreboard, matchups (no
+projections), a waiver report, and a final recap. Power rankings, player monitor, and every
 projection-based feature (projected scoreboard, projection-based close scores, achiever/
 underachiever trophies) are intentionally **not implemented** for Sleeper, because Sleeper's REST
 API exposes no projected-points field and computing power rankings would require lineup/roster data
 out of scope for this version.
 - `gamedaybot/sleeper/sleeper_api.py` - Thin REST client for `/league/{id}`, `/league/{id}/rosters`,
-  `/league/{id}/users`, `/league/{id}/matchups/{week}`, `/state/nfl`, and `/players/nfl`.
-  `/players/nfl` returns a ~5MB payload; per Sleeper's docs it is cached to disk and fetched at most
-  once per day.
-- `gamedaybot/sleeper/functionality.py` - `get_standings` and `get_trophies` for Sleeper leagues
+  `/league/{id}/users`, `/league/{id}/matchups/{week}`, `/league/{id}/transactions/{week}`,
+  `/state/nfl`, and `/players/nfl`. `/players/nfl` returns a ~5MB payload; per Sleeper's docs it is
+  cached to disk and fetched at most once per day.
+- `gamedaybot/sleeper/functionality.py` - `get_standings`, `get_trophies`, `get_scoreboard_short`,
+  `get_matchups`, `get_waiver_report`, and `get_final` for Sleeper leagues. Sleeper's API is
+  unauthenticated, so `get_waiver_report` is always available (no ESPN_S2/SWID-style credential gate).
 - `gamedaybot/sleeper/scheduler.py` - Scheduling for the reduced Sleeper function set (no power
-  rankings job)
+  rankings or monitor job)
 - `gamedaybot/sleeper/env_vars.py` - Environment variable management for Sleeper
 - `gamedaybot/sleeper/sleeper_bot.py` - Thin entry point mirroring `espn_bot.py` for Sleeper
 
@@ -75,7 +78,9 @@ The ESPN bot supports these scheduled message types:
 - `get_monitor` - Player status alerts
 - `get_close_scores` - Games within scoring threshold
 
-The Sleeper bot supports only `get_standings` and `get_trophies` (see above for why).
+The Sleeper bot supports `get_standings`, `get_trophies`, `get_scoreboard_short`, `get_matchups`
+(no projections), `get_waiver_report`, and `get_final`. It does not support `get_power_rankings`,
+`get_monitor`, `get_close_scores`, or `get_projected_scoreboard` (see above for why).
 
 ### Dependencies
 

@@ -59,6 +59,15 @@ class TestSleeperAPI:
         state = client.get_nfl_state()
         assert state['week'] == 6
 
+    def test_get_transactions(self, mock_requests):
+        mock_requests.get(
+            'https://api.sleeper.app/v1/league/12345/transactions/5',
+            json=[{'transaction_id': 't1', 'type': 'waiver', 'status': 'complete'}]
+        )
+        client = SleeperAPI(self.league_id)
+        transactions = client.get_transactions(5)
+        assert transactions[0]['type'] == 'waiver'
+
 
 @pytest.mark.usefixtures("mock_requests")
 class TestSleeperAPIPlayersCache:

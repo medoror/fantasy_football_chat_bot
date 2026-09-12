@@ -1,5 +1,7 @@
 import sys
 import os
+import time
+from datetime import date
 sys.path.insert(1, os.path.abspath('.'))
 import pytest
 import gamedaybot.sleeper.functionality as sleeper
@@ -211,3 +213,264 @@ class TestGetTrophies:
         result = sleeper.get_trophies(client, week=5)
 
         assert result == '\n'.join(['Trophies of the week:', 'No matchups available for this week'])
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestGetScoreboardShort:
+    '''Test get_scoreboard_short against mocked Sleeper roster/user/matchup endpoints'''
+
+    def test_get_scoreboard_short(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_scoreboard_short(client, week=5)
+
+        expected = '\n'.join([
+            'Score Update',
+            '%4s %6.2f - %6.2f %s' % ('Dynasty Warriors', 120.5, 110.0, 'Gridiron Gang'),
+            '%4s %6.2f - %6.2f %s' % ('End Zone Elite', 95.0, 60.0, 'Dave'),
+        ])
+        assert result == expected
+
+    def test_get_scoreboard_short_defaults_to_current_week(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 5, 'season': '2024'})
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_scoreboard_short(client)
+
+        assert result.startswith('Score Update')
+        assert 'Dynasty Warriors' in result
+
+    def test_get_scoreboard_short_excludes_bye_week_entries(self, mock_requests):
+        matchups = MATCHUPS_WEEK_5 + [
+            {'roster_id': 5, 'matchup_id': None, 'points': 0.0},
+            {'roster_id': 6, 'matchup_id': None, 'points': 0.0},
+        ]
+        users = USERS + [
+            {'user_id': '5', 'display_name': 'Eve', 'metadata': {'team_name': 'Bye Week Squad'}},
+            {'user_id': '6', 'display_name': 'Frank', 'metadata': {'team_name': 'Resting Roster'}},
+        ]
+        bye_settings = {'wins': 6, 'losses': 1, 'ties': 0, 'fpts': 700, 'fpts_decimal': 0}
+        rosters = ROSTERS + [
+            {'roster_id': 5, 'owner_id': '5', 'settings': bye_settings},
+            {'roster_id': 6, 'owner_id': '6', 'settings': bye_settings},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=users)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=matchups)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_scoreboard_short(client, week=5)
+
+        assert 'Bye Week Squad' not in result
+        assert 'Resting Roster' not in result
+        assert result.count('\n') == 2  # header + 2 real matchup lines only
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestGetMatchups:
+    '''Test get_matchups against mocked Sleeper roster/user/matchup endpoints'''
+
+    def test_get_matchups(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_matchups(client, week=5)
+
+        expected = '\n'.join([
+            'Matchups',
+            'Dynasty Warriors vs Gridiron Gang',
+            'End Zone Elite vs Dave',
+            '',
+            '%4s (%s) vs (%s) %s' % ('Dynasty Warriors', '5-2', '4-3', 'Gridiron Gang'),
+            '%4s (%s) vs (%s) %s' % ('End Zone Elite', '3-3-1', '2-5', 'Dave'),
+        ])
+        assert result == expected
+
+    def test_get_matchups_defaults_to_current_week(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 5, 'season': '2024'})
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_matchups(client)
+
+        assert result.startswith('Matchups')
+        assert 'Dynasty Warriors vs Gridiron Gang' in result
+
+    def test_get_matchups_excludes_bye_week_entries(self, mock_requests):
+        matchups = MATCHUPS_WEEK_5 + [
+            {'roster_id': 5, 'matchup_id': None, 'points': 0.0},
+            {'roster_id': 6, 'matchup_id': None, 'points': 0.0},
+        ]
+        users = USERS + [
+            {'user_id': '5', 'display_name': 'Eve', 'metadata': {'team_name': 'Bye Week Squad'}},
+            {'user_id': '6', 'display_name': 'Frank', 'metadata': {'team_name': 'Resting Roster'}},
+        ]
+        bye_settings = {'wins': 6, 'losses': 1, 'ties': 0, 'fpts': 700, 'fpts_decimal': 0}
+        rosters = ROSTERS + [
+            {'roster_id': 5, 'owner_id': '5', 'settings': bye_settings},
+            {'roster_id': 6, 'owner_id': '6', 'settings': bye_settings},
+        ]
+        _mock_league_endpoints(mock_requests, rosters=rosters, users=users)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=matchups)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_matchups(client, week=5)
+
+        assert 'Bye Week Squad' not in result
+        assert 'Resting Roster' not in result
+
+
+PLAYERS = {
+    '9001': {'first_name': 'Josh', 'last_name': 'Allen', 'position': 'QB'},
+    '9002': {'first_name': 'Cooper', 'last_name': 'Kupp', 'position': 'WR'},
+}
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestGetWaiverReport:
+    '''Test get_waiver_report against mocked Sleeper transaction/player endpoints'''
+
+    def test_get_waiver_report_add_and_drop_with_faab(self, mock_requests, tmp_path):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/players/nfl', json=PLAYERS)
+        transactions = [
+            {
+                'transaction_id': 't1',
+                'type': 'waiver',
+                'status': 'complete',
+                'created': int(time.time() * 1000),
+                'adds': {'9001': 1},
+                'drops': {'9002': 1},
+                'settings': {'waiver_bid': 15},
+            },
+        ]
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/transactions/5', json=transactions)
+        client = SleeperAPI('12345', cache_path=str(tmp_path / 'players_cache.json'))
+
+        result = sleeper.get_waiver_report(client, week=5)
+
+        expected = '\n'.join([
+            'Waiver Report %s: ' % date.today().strftime('%Y-%m-%d'),
+            'Dynasty Warriors \nADDED QB Josh Allen ($15)\nDROPPED WR Cooper Kupp\n',
+        ])
+        assert result == expected
+
+    def test_get_waiver_report_free_agent_add_only_no_faab(self, mock_requests, tmp_path):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/players/nfl', json=PLAYERS)
+        transactions = [
+            {
+                'transaction_id': 't2',
+                'type': 'free_agent',
+                'status': 'complete',
+                'created': int(time.time() * 1000),
+                'adds': {'9001': 2},
+                'drops': None,
+                'settings': None,
+            },
+        ]
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/transactions/5', json=transactions)
+        client = SleeperAPI('12345', cache_path=str(tmp_path / 'players_cache.json'))
+
+        result = sleeper.get_waiver_report(client, week=5)
+
+        expected = '\n'.join([
+            'Waiver Report %s: ' % date.today().strftime('%Y-%m-%d'),
+            'Gridiron Gang \nADDED QB Josh Allen\n',
+        ])
+        assert result == expected
+
+    def test_get_waiver_report_ignores_failed_and_non_today_transactions(self, mock_requests, tmp_path):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/players/nfl', json=PLAYERS)
+        old_created_ms = int((time.time() - 3 * 24 * 60 * 60) * 1000)
+        transactions = [
+            {
+                'transaction_id': 't3',
+                'type': 'waiver',
+                'status': 'failed',
+                'created': int(time.time() * 1000),
+                'adds': {'9001': 1},
+                'drops': None,
+                'settings': {'waiver_bid': 5},
+            },
+            {
+                'transaction_id': 't4',
+                'type': 'waiver',
+                'status': 'complete',
+                'created': old_created_ms,
+                'adds': {'9002': 2},
+                'drops': None,
+                'settings': {'waiver_bid': 5},
+            },
+            {
+                'transaction_id': 't5',
+                'type': 'trade',
+                'status': 'complete',
+                'created': int(time.time() * 1000),
+                'adds': {'9001': 1},
+                'drops': None,
+                'settings': None,
+            },
+        ]
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/transactions/5', json=transactions)
+        client = SleeperAPI('12345', cache_path=str(tmp_path / 'players_cache.json'))
+
+        result = sleeper.get_waiver_report(client, week=5)
+
+        assert result == 'No waiver transactions'
+
+    def test_get_waiver_report_empty_transactions_returns_message(self, mock_requests, tmp_path):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/players/nfl', json=PLAYERS)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/transactions/5', json=[])
+        client = SleeperAPI('12345', cache_path=str(tmp_path / 'players_cache.json'))
+
+        result = sleeper.get_waiver_report(client, week=5)
+
+        assert result == 'No waiver transactions'
+
+    def test_get_waiver_report_defaults_to_current_week(self, mock_requests, tmp_path):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 5, 'season': '2024'})
+        mock_requests.get('https://api.sleeper.app/v1/players/nfl', json=PLAYERS)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/transactions/5', json=[])
+        client = SleeperAPI('12345', cache_path=str(tmp_path / 'players_cache.json'))
+
+        result = sleeper.get_waiver_report(client)
+
+        assert result == 'No waiver transactions'
+
+
+@pytest.mark.usefixtures("mock_requests")
+class TestGetFinal:
+    '''Test get_final against mocked Sleeper roster/user/matchup endpoints'''
+
+    def test_get_final_composes_scoreboard_and_trophies(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_final(client, week=5)
+
+        expected_scoreboard = sleeper.get_scoreboard_short(client, week=5)
+        expected_trophies = sleeper.get_trophies(client, week=5)
+        expected = "Final " + expected_scoreboard + "\n\n" + expected_trophies
+        assert result == expected
+        assert result.startswith("Final Score Update")
+
+    def test_get_final_defaults_to_prior_week(self, mock_requests):
+        _mock_league_endpoints(mock_requests)
+        mock_requests.get('https://api.sleeper.app/v1/state/nfl', json={'week': 6, 'season': '2024'})
+        mock_requests.get('https://api.sleeper.app/v1/league/12345/matchups/5', json=MATCHUPS_WEEK_5)
+        client = SleeperAPI('12345')
+
+        result = sleeper.get_final(client)
+
+        assert result.startswith('Final Score Update')
+        assert 'Trophies of the week:' in result

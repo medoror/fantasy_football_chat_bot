@@ -1,3 +1,6 @@
+from datetime import date
+
+
 def _team_names_by_roster_id(rosters, users):
     """
     Build a mapping of roster_id -> display team name, preferring the
@@ -12,6 +15,54 @@ def _team_names_by_roster_id(rosters, users):
         team_name = metadata.get('team_name') or user.get('display_name') or f"Team {roster['roster_id']}"
         team_names[roster['roster_id']] = team_name
     return team_names
+
+
+def _wins_losses_ties(roster):
+    """
+    Extract (wins, losses, ties) from a roster's settings, treating a
+    missing or null "settings" (sent by Sleeper for uninitialized/newly-joined
+    rosters) as all zeroes.
+    """
+
+    settings = roster.get('settings') or {}
+    return settings.get('wins', 0), settings.get('losses', 0), settings.get('ties', 0)
+
+
+def _format_record(wins, losses, ties):
+    if ties:
+        return f'{wins}-{losses}-{ties}'
+    return f'{wins}-{losses}'
+
+
+def _paired_matchups(matchups):
+    """
+    Group matchup entries by matchup_id into head-to-head pairs.
+
+    Rosters on a bye have matchup_id: null and no real opponent, so they are
+    excluded before grouping. Any group that doesn't end up with exactly two
+    entries (a malformed payload) is skipped.
+
+    Returns
+    -------
+    list of tuple
+        A list of (entry_a, entry_b) pairs.
+    """
+
+    grouped = {}
+    for m in matchups:
+        if m.get('matchup_id') is None:
+            continue
+        grouped.setdefault(m['matchup_id'], []).append(m)
+
+    return [tuple(entries) for entries in grouped.values() if len(entries) == 2]
+
+
+def _player_display_name(player):
+    full_name = player.get('full_name')
+    if full_name:
+        return full_name
+    name = f"{player.get('first_name', '')} {player.get('last_name', '')}".strip()
+    return name or 'Unknown Player'
 
 
 def get_standings(client):
@@ -35,11 +86,8 @@ def get_standings(client):
 
     standings = []
     for roster in rosters:
-        # Sleeper returns "settings": null for uninitialized/newly-joined rosters.
+        wins, losses, ties = _wins_losses_ties(roster)
         settings = roster.get('settings') or {}
-        wins = settings.get('wins', 0)
-        losses = settings.get('losses', 0)
-        ties = settings.get('ties', 0)
         fpts = settings.get('fpts', 0) + settings.get('fpts_decimal', 0) / 100
         standings.append((wins, losses, ties, fpts, team_names[roster['roster_id']]))
 
@@ -157,22 +205,13 @@ def get_trophies(client, week=None):
     high_points, high_team = max(scores, key=lambda s: s[0])
     low_points, low_team = min(scores, key=lambda s: s[0])
 
-    grouped = {}
-    for m in matchups:
-        grouped.setdefault(m['matchup_id'], []).append(m)
-
     closest_diff = None
     close_winner = close_loser = None
     biggest_diff = -1
     blowout_winner = blowout_loser = None
     weekly_scores = {}
 
-    for entries in grouped.values():
-        if len(entries) != 2:
-            # Malformed matchup group (not exactly 2 rosters): no head-to-head result to compare.
-            continue
-
-        a, b = entries
+    for a, b in _paired_matchups(matchups):
         a_name = team_names.get(a['roster_id'], f"Team {a['roster_id']}")
         b_name = team_names.get(b['roster_id'], f"Team {b['roster_id']}")
         diff = abs(a['points'] - b['points'])
@@ -212,3 +251,199 @@ def get_trophies(client, week=None):
     text += _get_lucky_trophy(weekly_scores)
 
     return '\n'.join(text)
+
+
+def get_scoreboard_short(client, week=None):
+    """
+    Retrieve the scoreboard for a given week of a Sleeper fantasy football league.
+
+    Parameters
+    ----------
+    client : gamedaybot.sleeper.sleeper_api.SleeperAPI
+        The Sleeper API client for the league to retrieve the scoreboard for.
+    week : int, optional
+        The week for which to retrieve the scoreboard. Defaults to the current week.
+
+    Returns
+    -------
+    str
+        A string containing the scoreboard for the given week, formatted as a list of matchups.
+    """
+
+    if not week:
+        state = client.get_nfl_state()
+        week = int(state['week'])
+
+    matchups = client.get_matchups(week)
+    rosters = client.get_rosters()
+    users = client.get_users()
+    team_names = _team_names_by_roster_id(rosters, users)
+
+    score = []
+    for a, b in _paired_matchups(matchups):
+        a_name = team_names.get(a['roster_id'], f"Team {a['roster_id']}")
+        b_name = team_names.get(b['roster_id'], f"Team {b['roster_id']}")
+        score.append('%4s %6.2f - %6.2f %s' % (a_name, a['points'], b['points'], b_name))
+
+    text = ['Score Update'] + score
+    return '\n'.join(text)
+
+
+def get_matchups(client, week=None):
+    """
+    Retrieve the matchups for a given week in a Sleeper fantasy football league.
+
+    Note
+    ----
+    Sleeper has no per-player projected-points field, so unlike the ESPN
+    version this does not append a projected scoreboard.
+
+    Parameters
+    ----------
+    client : gamedaybot.sleeper.sleeper_api.SleeperAPI
+        The Sleeper API client for the league to retrieve the matchups for.
+    week : int, optional
+        The week for which to retrieve the matchups. Defaults to the current week.
+
+    Returns
+    -------
+    str
+        A string containing the matchups for the given week, formatted as a list of team names and records.
+    """
+
+    if not week:
+        state = client.get_nfl_state()
+        week = int(state['week'])
+
+    matchups = client.get_matchups(week)
+    rosters = client.get_rosters()
+    users = client.get_users()
+    team_names = _team_names_by_roster_id(rosters, users)
+    records = {roster['roster_id']: _wins_losses_ties(roster) for roster in rosters}
+
+    full_names = []
+    records_txt = []
+    for a, b in _paired_matchups(matchups):
+        a_name = team_names.get(a['roster_id'], f"Team {a['roster_id']}")
+        b_name = team_names.get(b['roster_id'], f"Team {b['roster_id']}")
+        full_names.append('%s vs %s' % (a_name, b_name))
+
+        a_record = _format_record(*records.get(a['roster_id'], (0, 0, 0)))
+        b_record = _format_record(*records.get(b['roster_id'], (0, 0, 0)))
+        records_txt.append('%4s (%s) vs (%s) %s' % (a_name, a_record, b_record, b_name))
+
+    text = ['Matchups'] + full_names + [''] + records_txt
+    return '\n'.join(text)
+
+
+def get_waiver_report(client, week=None):
+    """
+    Retrieve a waiver report of today's completed waiver/free-agent transactions for a
+    Sleeper fantasy football league.
+
+    Parameters
+    ----------
+    client : gamedaybot.sleeper.sleeper_api.SleeperAPI
+        The Sleeper API client for the league to retrieve the waiver report for.
+    week : int, optional
+        The week (transaction round) for which to retrieve the waiver report. Defaults to the current week.
+
+    Returns
+    -------
+    str
+        A string containing the waiver report.
+    """
+
+    if not week:
+        state = client.get_nfl_state()
+        week = int(state['week'])
+
+    transactions = client.get_transactions(week)
+    rosters = client.get_rosters()
+    users = client.get_users()
+    team_names = _team_names_by_roster_id(rosters, users)
+    players = client.get_players()
+
+    today = date.today().strftime('%Y-%m-%d')
+    report = []
+
+    for txn in transactions:
+        if txn.get('type') not in ('waiver', 'free_agent'):
+            continue
+        # A failed waiver claim never actually added or dropped anyone.
+        if txn.get('status') != 'complete':
+            continue
+
+        created = txn.get('created')
+        if created is None:
+            continue
+        txn_date = date.fromtimestamp(created / 1000).strftime('%Y-%m-%d')
+        if txn_date != today:
+            continue
+
+        adds = txn.get('adds') or {}
+        drops = txn.get('drops') or {}
+        settings = txn.get('settings') or {}
+        faab = settings.get('waiver_bid')
+
+        by_roster = {}
+        for player_id, roster_id in adds.items():
+            by_roster.setdefault(roster_id, {'adds': [], 'drops': []})['adds'].append(player_id)
+        for player_id, roster_id in drops.items():
+            by_roster.setdefault(roster_id, {'adds': [], 'drops': []})['drops'].append(player_id)
+
+        for roster_id, moves in by_roster.items():
+            team_name = team_names.get(roster_id, f"Team {roster_id}")
+            lines = []
+            for player_id in moves['adds']:
+                player = players.get(player_id, {})
+                name = _player_display_name(player)
+                position = player.get('position', '')
+                if faab is not None:
+                    lines.append(f'ADDED {position} {name} (${faab})')
+                else:
+                    lines.append(f'ADDED {position} {name}')
+            for player_id in moves['drops']:
+                player = players.get(player_id, {})
+                name = _player_display_name(player)
+                position = player.get('position', '')
+                lines.append(f'DROPPED {position} {name}')
+
+            if lines:
+                s = f'{team_name} \n' + '\n'.join(lines) + '\n'
+                report.append(s.lstrip())
+
+    report.reverse()
+
+    if not report:
+        return 'No waiver transactions'
+
+    text = [f'Waiver Report {today}: '] + report
+    return '\n'.join(text)
+
+
+def get_final(client, week=None):
+    """
+    Retrieve the final scoreboard and trophies for the prior completed week of a
+    Sleeper fantasy football league.
+
+    Parameters
+    ----------
+    client : gamedaybot.sleeper.sleeper_api.SleeperAPI
+        The Sleeper API client for the league to retrieve the final recap for.
+    week : int, optional
+        The week for which to retrieve the recap. Defaults to the prior completed week.
+
+    Returns
+    -------
+    str
+        A string containing the final scoreboard followed by the week's trophies.
+    """
+
+    if not week:
+        state = client.get_nfl_state()
+        week = max(int(state['week']) - 1, 1)
+
+    text = "Final " + get_scoreboard_short(client, week=week)
+    text = text + "\n\n" + get_trophies(client, week=week)
+    return text

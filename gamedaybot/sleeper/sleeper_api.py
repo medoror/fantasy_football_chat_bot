@@ -62,6 +62,11 @@ class SleeperAPI:
 
         return self._get('/state/nfl')
 
+    def get_transactions(self, week):
+        """Retrieve waiver/free-agent/trade transactions for a given week (round)."""
+
+        return self._get(f'/league/{self.league_id}/transactions/{week}')
+
     def get_players(self):
         """
         Retrieve NFL player metadata, cached to disk for at most one day.
