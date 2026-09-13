@@ -1,30 +1,10 @@
 import os
-import gamedaybot.espn.functionality as espn
 import gamedaybot.utils.util as utils
+from gamedaybot.utils.env import get_common_env_vars
 
 
 def get_env_vars():
-    data = {}
-    try:
-        ff_start_date = os.environ["START_DATE"]
-    except KeyError:
-        ff_start_date = '2024-09-05'
-
-    data['ff_start_date'] = ff_start_date
-
-    try:
-        ff_end_date = os.environ["END_DATE"]
-    except KeyError:
-        ff_end_date = '2025-01-05'
-
-    data['ff_end_date'] = ff_end_date
-
-    try:
-        my_timezone = os.environ["TIMEZONE"]
-    except KeyError:
-        my_timezone = 'America/New_York'
-
-    data['my_timezone'] = my_timezone
+    data = get_common_env_vars()
 
     try:
         daily_waiver = utils.str_to_bool(os.environ["DAILY_WAIVER"])
@@ -122,11 +102,5 @@ def get_env_vars():
         waiver_report = False
 
     data['waiver_report'] = waiver_report
-
-    try:
-        data['init_msg'] = os.environ["INIT_MSG"]
-    except KeyError:
-        # do nothing here, empty init message
-        pass
 
     return data
