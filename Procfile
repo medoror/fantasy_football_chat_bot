@@ -1,1 +1,1 @@
-worker: python3 gamedaybot/espn/espn_bot.py
+worker: python3 gamedaybot/bot.py
