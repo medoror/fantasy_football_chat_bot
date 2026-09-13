@@ -18,7 +18,7 @@ flake8
 **Running the Bot:**
 ```bash
 # Local development
-python3 gamedaybot/espn/espn_bot.py
+python3 gamedaybot/bot.py
 
 # With Docker
 docker build -t fantasy_football_chat_bot .
@@ -36,14 +36,15 @@ This is a Fantasy Football chat bot that sends automated messages to GroupMe, Sl
 ### Core Structure
 
 **Main Entry Point:**
-- `gamedaybot/espn/espn_bot.py` - Contains the main `espn_bot()` function that orchestrates ESPN bot functionality. Its `__main__` block also reads `PLATFORM` and dispatches to the Sleeper bot/scheduler instead when `PLATFORM=sleeper`.
+- `gamedaybot/bot.py` - The platform-neutral process entry point (`python3 gamedaybot/bot.py`). Its `__main__` block reads `PLATFORM` (defaulting to `espn` only when the env var is unset), validates it against the `PLATFORMS` registry, and raises `ValueError` for anything unrecognized rather than silently falling back to ESPN. `PLATFORMS` maps a platform name to a function that lazily imports and returns that platform's `(bot_callable, scheduler_callable)` pair - only the selected platform's modules are ever imported, and adding a third provider is one registry entry, not another branch. `gamedaybot/espn/espn_bot.py` itself has zero awareness of Sleeper: its own `__main__` block is ESPN-only (kept for direct/local invocation of that module specifically), same as `gamedaybot/sleeper/sleeper_bot.py`'s.
 
 **ESPN Components (PLATFORM=espn, the default):**
 - `gamedaybot/espn/functionality.py` - Core ESPN fantasy football functions (scores, standings, matchups, power rankings, etc.)
 - `gamedaybot/espn/scheduler.py` - APScheduler-based job scheduling for automated messages
-- `gamedaybot/espn/env_vars.py` - Environment variable management and defaults
+- `gamedaybot/espn/env_vars.py` - ESPN-specific env vars (LEAGUE_ID/LEAGUE_YEAR/SWID/ESPN_S2/TEST/TOP_HALF_SCORING/RANDOM_PHRASE/WAIVER_REPORT/DAILY_WAIVER/MONITOR_REPORT), layered on top of `get_common_env_vars()`
 - `gamedaybot/chat/` - Platform-specific messaging clients (GroupMe, Slack, Discord), shared with Sleeper
 - `gamedaybot/utils/util.py` - Utility functions including string manipulation and message splitting
+- `gamedaybot/utils/env.py` - `get_common_env_vars()`, the platform-agnostic env var block (schedule window, messaging platform config/str_limit, INIT_MSG) shared by both `gamedaybot/espn/env_vars.py` and `gamedaybot/sleeper/env_vars.py`
 
 **Sleeper Components (PLATFORM=sleeper):**
 Sleeper (`api.sleeper.app/v1`) is unauthenticated and needs no year/cookie auth - a league is
@@ -70,7 +71,7 @@ projected-points field.
   (1..week), for both the current and previous snapshots it diffs - acceptable given Sleeper's
   generous rate limits, but worth knowing before calling it deep into a long season.
 - `gamedaybot/sleeper/scheduler.py` - Scheduling for the reduced Sleeper function set (no monitor job)
-- `gamedaybot/sleeper/env_vars.py` - Environment variable management for Sleeper
+- `gamedaybot/sleeper/env_vars.py` - Sleeper-specific env vars (just `SLEEPER_LEAGUE_ID`), layered on top of `get_common_env_vars()`
 - `gamedaybot/sleeper/sleeper_bot.py` - Thin entry point mirroring `espn_bot.py` for Sleeper
 
 **Message Functions:**
@@ -107,4 +108,4 @@ The bot requires these key environment variables:
 
 ### Testing Strategy
 
-Tests use `pytest` with mocking via `requests_mock` for HTTP calls. Test files mirror the source structure in the `tests/` directory. Sleeper tests (`tests/test_sleeper_api.py`, `tests/test_sleeper_functionality.py`) mock the Sleeper REST endpoints with representative JSON payloads and include coverage of the `/players/nfl` daily disk-cache behavior.
+Tests use `pytest` with mocking via `requests_mock` for HTTP calls. Test files mirror the source structure in the `tests/` directory. Sleeper tests (`tests/test_sleeper_api.py`, `tests/test_sleeper_functionality.py`) mock the Sleeper REST endpoints with representative JSON payloads and include coverage of the `/players/nfl` daily disk-cache behavior. `tests/test_bot.py` covers `gamedaybot/bot.py`'s `PLATFORM` validation/dispatch, and `tests/test_env_vars.py` covers `gamedaybot/espn/env_vars.py`/`gamedaybot/sleeper/env_vars.py` (via `monkeypatch`'d env vars) to confirm the shared `get_common_env_vars()` extraction preserves each platform's original behavior.

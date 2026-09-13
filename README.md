@@ -269,7 +269,7 @@ Use BOT_ID if using Groupme, DISCORD_WEBHOOK_URL if using Discord, and SLACK_WEB
 >>> export WEBHOOK_URL=[enter your Webhook URL]
 >>> export LEAGUE_ID=[enter ESPN league ID]
 >>> export LEAGUE_YEAR=[enter league year]
->>> python3 gamedaybot/espn/espn_bot.py
+>>> python3 gamedaybot/bot.py
 ```
 
 ### Running the tests
@@ -303,7 +303,7 @@ unauthenticated and public, so setup is simpler than ESPN: you only need your le
 >>> export PLATFORM=sleeper
 >>> export SLEEPER_LEAGUE_ID=[enter your Sleeper league ID]
 >>> export BOT_ID=[enter your GroupMe Bot ID]
->>> python3 gamedaybot/espn/espn_bot.py
+>>> python3 gamedaybot/bot.py
 ```
 
 **Reduced feature set:** Sleeper's REST API does not expose everything ESPN's API does, so

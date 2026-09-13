@@ -220,16 +220,7 @@ def espn_bot(function):
 
 
 if __name__ == '__main__':
-    platform = os.environ.get('PLATFORM', 'espn').strip().lower()
+    from gamedaybot.espn.scheduler import scheduler
 
-    if platform == 'sleeper':
-        from gamedaybot.sleeper.sleeper_bot import sleeper_bot
-        from gamedaybot.sleeper.scheduler import scheduler as sleeper_scheduler
-
-        sleeper_bot("init")
-        sleeper_scheduler()
-    else:
-        from gamedaybot.espn.scheduler import scheduler
-
-        espn_bot("init")
-        scheduler()
+    espn_bot("init")
+    scheduler()
