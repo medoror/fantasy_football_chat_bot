@@ -20,6 +20,47 @@ def get_env_vars():
 
     data['monitor_report'] = monitor_report
 
+    try:
+        close_scores_threshold = int(os.environ["CLOSE_SCORES_THRESHOLD"])
+    except (KeyError, ValueError):
+        # Unset, or set to something that is not a whole number. A typo in one
+        # optional env var should not take down every scheduled message, so
+        # fall back to the default rather than raise.
+        close_scores_threshold = espn.CLOSE_SCORES_DEFAULT_THRESHOLD
+
+    data['close_scores_threshold'] = close_scores_threshold
+
+    str_limit = 40000  # slack char limit
+
+    try:
+        bot_id = os.environ["BOT_ID"]
+        str_limit = 1000
+    except KeyError:
+        bot_id = 1
+
+    try:
+        slack_webhook_url = os.environ["SLACK_WEBHOOK_URL"]
+    except KeyError:
+        slack_webhook_url = 1
+
+    try:
+        discord_webhook_url = os.environ["DISCORD_WEBHOOK_URL"]
+        str_limit = 3000
+    except KeyError:
+        discord_webhook_url = 1
+
+    if (len(str(bot_id)) <= 1 and
+        len(str(slack_webhook_url)) <= 1 and
+            len(str(discord_webhook_url)) <= 1):
+        # Ensure that there's info for at least one messaging platform,
+        # use length of str in case of blank but non null env variable
+        raise Exception("No messaging platform info provided. Be sure one of BOT_ID, SLACK_WEBHOOK_URL, or DISCORD_WEBHOOK_URL env variables are set")
+
+    data['str_limit'] = str_limit
+    data['bot_id'] = bot_id
+    data['slack_webhook_url'] = slack_webhook_url
+    data['discord_webhook_url'] = discord_webhook_url
+
     data['league_id'] = os.environ["LEAGUE_ID"]
 
     try:
@@ -54,20 +95,6 @@ def get_env_vars():
         test = False
 
     data['test'] = test
-
-    try:
-        top_half_scoring = utils.str_to_bool(os.environ["TOP_HALF_SCORING"])
-    except KeyError:
-        top_half_scoring = False
-
-    data['top_half_scoring'] = top_half_scoring
-
-    try:
-        random_phrase = utils.str_to_bool(os.environ["RANDOM_PHRASE"])
-    except KeyError:
-        random_phrase = False
-
-    data['random_phrase'] = random_phrase
 
     try:
         waiver_report = utils.str_to_bool(os.environ["WAIVER_REPORT"])
